@@ -189,6 +189,8 @@ pub const WORKSPACES_FILE: &str = "workspaces.json";
 pub struct WorkspacePrefs {
     pub saved: Vec<SavedWorkspace>,
     pub current: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drafts: Vec<SavedWorkspace>,
 }
 
 /// A named layout. `layout` is a [`DockNode`] kept as JSON, so one unreadable entry (a panel a
@@ -245,6 +247,11 @@ pub fn names(prefs: &WorkspacePrefs) -> Vec<String> {
             v.push(s.name.clone());
         }
     }
+    for d in &prefs.drafts {
+        if !v.contains(&d.name) {
+            v.push(d.name.clone());
+        }
+    }
     v.sort_by_key(|n| n.to_lowercase());
     v
 }
@@ -271,6 +278,26 @@ pub fn saved_docking(prefs: &WorkspacePrefs, name: &str) -> Layout {
         layout.validate().ok().map(|()| layout)
     });
     saved.unwrap_or_else(|| Layout { root: workspace(name), floating: vec![] })
+}
+
+/// The active layout of a workspace: the working auto-saved draft if edited, else the saved version.
+pub fn active_docking(prefs: &WorkspacePrefs, name: &str) -> Layout {
+    let draft = prefs.drafts.iter().find(|draft| draft.name == name).and_then(|draft| {
+        let mut layout = Layout {
+            root: serde_json::from_value(draft.layout.clone()).ok()?,
+            floating: if draft.floating.is_null() { vec![] } else { serde_json::from_value(draft.floating.clone()).ok()? },
+        };
+        if layout.floating.is_empty() {
+            migrate_legacy_effects(&mut layout.root);
+        }
+        layout.validate().ok().map(|()| layout)
+    });
+    draft.unwrap_or_else(|| saved_docking(prefs, name))
+}
+
+/// Whether the workspace has auto-saved edits that differ from its saved baseline.
+pub fn has_draft(prefs: &WorkspacePrefs, name: &str) -> bool {
+    prefs.drafts.iter().any(|draft| draft.name == name)
 }
 
 /// Older Effects workspaces stored the same Effect Controls panel twice: selected beside

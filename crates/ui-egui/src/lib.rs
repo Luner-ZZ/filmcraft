@@ -820,18 +820,71 @@ impl FilmcraftApp {
         self.session.prefs_path.as_ref().and_then(|p| p.parent()).map(|d| d.join(dock::WORKSPACES_FILE))
     }
 
-    /// Replace the saved workspaces and write them to the data directory.
-    pub fn set_workspaces(&mut self, w: dock::WorkspacePrefs) -> Result<(), String> {
-        self.workspaces = w;
+    /// Save the current workspace preferences to the data directory.
+    pub fn save_workspaces(&mut self) -> Result<(), String> {
         match self.workspaces_path() {
             Some(p) => self.workspaces.save(&p).map_err(|e| format!("saving workspaces: {e}")),
             None => Ok(()),
         }
     }
 
+    /// Replace the saved workspaces and write them to the data directory.
+    pub fn set_workspaces(&mut self, w: dock::WorkspacePrefs) -> Result<(), String> {
+        self.workspaces = w;
+        self.save_workspaces()
+    }
+
+    /// Auto-save any layout changes made to the current workspace as a working draft.
+    pub fn sync_workspace_draft(&mut self) {
+        if !self.workspace_restored || self.ui.workspace.is_empty() || self.ui.keys.maximized.is_some() {
+            return;
+        }
+        let current = dock::Layout { root: self.ui.dock.clone(), floating: self.ui.floating.clone() };
+        if current.validate().is_err() {
+            return;
+        }
+        let saved = dock::saved_docking(&self.workspaces, &self.ui.workspace);
+        let name = self.ui.workspace.clone();
+        if current == saved {
+            if self.workspaces.drafts.iter().any(|d| d.name == name) {
+                self.workspaces.drafts.retain(|d| d.name != name);
+                let _ = self.save_workspaces();
+            }
+        } else {
+            let Ok(layout) = serde_json::to_value(&current.root) else { return };
+            let floating = if current.floating.is_empty() {
+                serde_json::Value::Null
+            } else {
+                let Ok(val) = serde_json::to_value(&current.floating) else { return };
+                val
+            };
+            let mut changed = false;
+            if let Some(draft) = self.workspaces.drafts.iter_mut().find(|d| d.name == name) {
+                if draft.layout != layout || draft.floating != floating {
+                    draft.layout = layout;
+                    draft.floating = floating;
+                    changed = true;
+                }
+            } else {
+                self.workspaces.drafts.push(dock::SavedWorkspace {
+                    name: name.clone(),
+                    layout,
+                    floating,
+                });
+                changed = true;
+            }
+            if changed {
+                let _ = self.save_workspaces();
+            }
+        }
+    }
+
     pub fn set_workspace(&mut self, name: &str) {
+        if self.workspace_restored && !self.ui.workspace.is_empty() && self.ui.workspace != name {
+            self.sync_workspace_draft();
+        }
         self.ui.workspace = name.to_string();
-        let layout = dock::saved_docking(&self.workspaces, name);
+        let layout = dock::active_docking(&self.workspaces, name);
         self.ui.dock = layout.root;
         self.ui.floating = layout.floating;
         self.pending_panel_raise = None;
@@ -2093,6 +2146,7 @@ impl eframe::App for FilmcraftApp {
     }
 
     fn on_exit(&mut self) {
+        self.sync_workspace_draft();
         // Flush the recovery journal and stop the auto-save worker; a session with nothing unsaved
         // removes its journal, one with unsaved changes keeps it for the next launch.
         self.session.shutdown();

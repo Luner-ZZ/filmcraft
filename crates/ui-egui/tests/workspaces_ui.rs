@@ -175,7 +175,9 @@ fn save_switch_reset_rename_delete_and_restart() {
             "Reset to Saved Layout",
             "Save Changes to this Workspace",
             "Save as New Workspace…",
-            "Edit Workspaces…"
+            "Edit Workspaces…",
+            "Import Workspace…",
+            "Export Workspace…"
         ],
         "one alphabetical list, then the layout commands"
     );
@@ -276,5 +278,127 @@ fn save_rename_and_delete_through_the_dialogs() {
     d.frames(4); // the window shrinks to the shorter list
     d.click("workspaces.edit.close");
     assert!(d.app().ui.workspace_dialog.is_none(), "Close closes the dialog");
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn workspace_changes_auto_saved_across_workspace_switches() {
+    let data = data_dir("auto-save-switch");
+    let mut d = Driver::launch(&data);
+    assert_eq!(d.workspace(), "Editing");
+    assert!(d.shows(PanelKind::Metadata));
+
+    // Close Metadata panel in Editing
+    d.ok("ui.panel.close", json!({"panel": "Metadata"}));
+    assert!(!d.shows(PanelKind::Metadata));
+
+    // Check draft is tracked in preferences file
+    let file = saved_file(&data);
+    let drafts = file["drafts"].as_array().expect("drafts array in workspaces.json");
+    assert!(drafts.iter().any(|d| d["name"] == "Editing"), "Editing draft should be persisted");
+
+    // Switch to Color workspace
+    d.menu("window.workspace.color", json!({}));
+    assert_eq!(d.workspace(), "Color");
+    assert!(d.shows(PanelKind::LumetriColor));
+
+    // Switch back to Editing: the auto-saved draft layout is retained
+    d.menu("window.workspace.editing", json!({}));
+    assert_eq!(d.workspace(), "Editing");
+    assert!(!d.shows(PanelKind::Metadata), "auto-saved draft layout must survive switching away and back");
+
+    // Reset to Saved Layout discards the draft and restores baseline
+    d.menu("window.workspace.reset", json!({}));
+    assert!(d.shows(PanelKind::Metadata), "Reset to Saved Layout must restore original layout");
+
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn workspace_changes_auto_saved_across_app_restart() {
+    let data = data_dir("auto-save-restart");
+    let mut d = Driver::launch(&data);
+    assert_eq!(d.workspace(), "Editing");
+    assert!(d.shows(PanelKind::Metadata));
+
+    // Modify Editing layout
+    d.ok("ui.panel.close", json!({"panel": "Metadata"}));
+    assert!(!d.shows(PanelKind::Metadata));
+    drop(d);
+
+    // Launch a fresh app session from the same data directory
+    let mut d = Driver::launch(&data);
+    assert_eq!(d.workspace(), "Editing");
+    assert!(!d.shows(PanelKind::Metadata), "auto-saved layout must survive app restart");
+
+    // Resetting on restarted app restores baseline
+    d.menu("window.workspace.reset", json!({}));
+    assert!(d.shows(PanelKind::Metadata), "reset works after restart");
+
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn workspace_export_and_import() {
+    let data = data_dir("export-import");
+    let mut d = Driver::launch(&data);
+    assert_eq!(d.workspace(), "Editing");
+    assert!(d.shows(PanelKind::Metadata));
+
+    // Make an edit to Editing
+    d.ok("ui.panel.close", json!({"panel": "Metadata"}));
+    assert!(!d.shows(PanelKind::Metadata));
+
+    // Export current workspace to file
+    let export_path = data.join("editing_layout.fcws");
+    let path_str = export_path.to_str().expect("valid utf-8 path");
+    let exported = d.menu("window.workspace.export", json!({"name": "Editing", "path": path_str}));
+    assert_eq!(exported["exported"], "Editing");
+    assert!(export_path.exists());
+
+    let content: Value = serde_json::from_slice(&std::fs::read(&export_path).unwrap()).unwrap();
+    assert_eq!(content["filmcraftWorkspace"], 1);
+    assert_eq!(content["name"], "Editing");
+    assert!(content.get("layout").is_some());
+
+    // Reset Editing back to default
+    d.menu("window.workspace.reset", json!({}));
+    assert!(d.shows(PanelKind::Metadata));
+
+    // Import exported workspace back; because "Editing" is a built-in, it gets imported as "Editing (Custom)"
+    let imported = d.menu("window.workspace.import", json!({"path": path_str}));
+    assert_eq!(imported["imported"], "Editing (Custom)");
+    assert_eq!(d.workspace(), "Editing (Custom)");
+    assert!(!d.shows(PanelKind::Metadata), "imported layout restored the modified state");
+
+    // Import a workspace with a custom name
+    let studio_path = data.join("studio.json");
+    let studio_str = studio_path.to_str().expect("valid path");
+    let studio_payload = json!({
+        "filmcraftWorkspace": 1,
+        "name": "Studio Edit",
+        "layout": content["layout"],
+        "floating": null
+    });
+    std::fs::write(&studio_path, serde_json::to_vec_pretty(&studio_payload).unwrap()).unwrap();
+    let imported_studio = d.menu("window.workspace.import", json!({"path": studio_str}));
+    assert_eq!(imported_studio["imported"], "Studio Edit");
+    assert_eq!(d.workspace(), "Studio Edit");
+    assert!(!d.shows(PanelKind::Metadata));
+    assert!(d.workspaces_menu().iter().any(|(l, c)| l == "Studio Edit" && *c));
+
+    // Invalid imports: oversized, invalid JSON, missing layout
+    let oversized = data.join("too_large.fcws");
+    std::fs::write(&oversized, vec![b' '; 5 * 1024 * 1024]).unwrap();
+    assert!(d.menu_err("window.workspace.import", json!({"path": oversized.to_str().unwrap()})).contains("too large"));
+
+    let corrupt = data.join("corrupt.fcws");
+    std::fs::write(&corrupt, b"{not json}").unwrap();
+    assert!(d.menu_err("window.workspace.import", json!({"path": corrupt.to_str().unwrap()})).contains("invalid JSON"));
+
+    let nolayout = data.join("no_layout.fcws");
+    std::fs::write(&nolayout, b"{\"name\":\"Empty\"}").unwrap();
+    assert!(d.menu_err("window.workspace.import", json!({"path": nolayout.to_str().unwrap()})).contains("missing `layout`"));
+
     let _ = std::fs::remove_dir_all(&data);
 }

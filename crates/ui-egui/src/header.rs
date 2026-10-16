@@ -164,15 +164,39 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 ui.set_min_width(220.0);
                 for w in crate::dock::names(&app.workspaces) {
                     let sel = app.ui.workspace == w;
-                    if ui.selectable_label(sel, crate::i18n::t(&w)).clicked() {
+                    let label = if crate::dock::has_draft(&app.workspaces, &w) {
+                        format!("{} *", crate::i18n::t(&w))
+                    } else {
+                        crate::i18n::t(&w).to_string()
+                    };
+                    if ui.selectable_label(sel, label).clicked() {
                         app.set_workspace(&w);
                         ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
                     }
                 }
                 ui.separator();
                 if ui.button(tl!("Reset to Saved Layout")).clicked() {
-                    let n = app.ui.workspace.clone();
-                    app.set_workspace(&n);
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.reset", &serde_json::json!({}));
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                }
+                if ui.button(tl!("Save Changes to this Workspace")).clicked() {
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.saveChanges", &serde_json::json!({}));
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                }
+                if ui.button(tl!("Save as New Workspace…")).clicked() {
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.saveAs", &serde_json::json!({}));
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                }
+                if ui.button(tl!("Edit Workspaces…")).clicked() {
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.edit", &serde_json::json!({}));
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                }
+                if ui.button(tl!("Import Workspace…")).clicked() {
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.import", &serde_json::json!({}));
+                    ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
+                }
+                if ui.button(tl!("Export Workspace…")).clicked() {
+                    let _ = crate::panels::workspaces::route(app, "window.workspace.export", &serde_json::json!({}));
                     ui.ctx().data_mut(|d| d.insert_temp(popup_id, false));
                 }
             });

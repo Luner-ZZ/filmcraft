@@ -109,6 +109,7 @@ impl FilmcraftApp {
         {
             self.ui.keys.maximized = None;
         }
+        self.sync_workspace_draft();
         Ok(())
     }
 
@@ -116,6 +117,7 @@ impl FilmcraftApp {
     pub fn dock_to_edge(&mut self, panel: PanelKind, zone: Zone) -> Result<(), String> {
         self.commit_dock(|shared| crate::dock_shared::dock_at_edge(shared, panel, zone))?;
         self.ui.keys.maximized = None;
+        self.sync_workspace_draft();
         Ok(())
     }
 

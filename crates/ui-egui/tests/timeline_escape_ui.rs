@@ -213,3 +213,31 @@ fn escape_cancels_marquee_selection() {
 
     assert_eq!(d.app().session.state.selection, vec![v2.id], "original selection is preserved");
 }
+
+#[test]
+fn ruler_scrub_moves_immediately_without_initial_deadzone_stutter() {
+    let mut d = Driver::demo();
+    let initial_playhead = d.app().session.playhead();
+    let layout = d.app().tl.layout.as_ref().expect("layout").clone();
+    let from = pos2(layout.x_of(initial_playhead), layout.ruler.center().y);
+
+    d.send(egui::Event::PointerMoved(from));
+    d.send(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    assert!(matches!(d.app().tl.drag, Some(Drag::Scrub { .. })), "ruler scrub drag starts immediately on press");
+
+    // Move pointer by small 2px and 4px deltas (well within the standard 6px click/drag dead-zone threshold)
+    let p2 = pos2(from.x + 2.0, from.y);
+    d.send(egui::Event::PointerMoved(p2));
+    let t2 = d.app().session.playhead();
+    assert_ne!(t2, initial_playhead, "playhead follows pointer immediately on 2px move without waiting for drag threshold");
+
+    let p4 = pos2(from.x + 4.0, from.y);
+    d.send(egui::Event::PointerMoved(p4));
+    let t4 = d.app().session.playhead();
+    assert!(t4 > t2, "playhead continues moving smoothly forward without snap-back stutter");
+
+    // Releasing the button cleanly concludes the scrub
+    d.send(egui::Event::PointerButton { pos: p4, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+    d.frames(2);
+    assert!(d.app().tl.drag.is_none(), "drag state cleared after pointer release");
+}

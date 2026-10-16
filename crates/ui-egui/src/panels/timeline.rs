@@ -2228,6 +2228,9 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
     if ctx.input(|i| !i.pointer.any_down() && !i.pointer.any_released()) {
         app.tl.pressed = None;
         app.tl.cancelled = false;
+        if matches!(app.tl.drag, Some(Drag::Scrub { .. })) {
+            app.tl.drag = None;
+        }
     }
     if resp.is_pointer_button_down_on()
         && ctx.input(|i| i.pointer.primary_pressed())
@@ -2237,7 +2240,9 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
         let grab = grab_at(seq, layout, p, tool, mods, roll_ripple);
         // the playhead jumps to a press on the ruler at once, not only once the pointer has moved (#1090)
         if matches!(grab, Grab::Other(Hit::Ruler)) {
+            let initial = app.session.playhead();
             scrub_playhead(app, seq, layout, p, mods.shift);
+            app.tl.drag = Some(Drag::Scrub { initial });
         }
         app.tl.pressed = Some(Pressed { pos: p, tick: layout.tick_at(p.x), grab });
     }
@@ -2359,7 +2364,13 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                 let last = ctx.input(|i| i.pointer.press_origin()).unwrap_or(p);
                 Some(Drag::Pan { last, start_scroll: app.ui.timeline.target_scroll, start_v: app.ui.timeline.v_scroll })
             }
-            (_, Grab::Other(Hit::Ruler)) => Some(Drag::Scrub { initial: app.session.playhead() }),
+            (_, Grab::Other(Hit::Ruler)) => {
+                if app.tl.drag.is_none() {
+                    Some(Drag::Scrub { initial: app.session.playhead() })
+                } else {
+                    None
+                }
+            }
             (Tool::Hand, _) => Some(Drag::Pan { last: p, start_scroll: app.ui.timeline.target_scroll, start_v: app.ui.timeline.v_scroll }),
             (Tool::Zoom, _) => {
                 if resp.clicked() {
@@ -2546,9 +2557,12 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
     }
 
     // ---- drag
+    let scrubbing = matches!(app.tl.drag, Some(Drag::Scrub { .. }))
+        && resp.is_pointer_button_down_on()
+        && ctx.input(|i| i.pointer.primary_down());
     if !app.tl.cancelled
-        && resp.dragged()
-        && let Some(p) = resp.interact_pointer_pos()
+        && (resp.dragged() || scrubbing)
+        && let Some(p) = pos.or(resp.interact_pointer_pos())
         && let Some(d) = app.tl.drag.clone()
     {
         let t_here = layout.tick_at(p.x);
@@ -2726,6 +2740,11 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
         } else {
             app.tl.drag = None;
         }
+    }
+    if matches!(app.tl.drag, Some(Drag::Scrub { .. }))
+        && (ctx.input(|i| i.pointer.primary_released()) || resp.drag_stopped() || resp.clicked())
+    {
+        app.tl.drag = None;
     }
 
     // ---- double-click a transition: Set Transition Duration (Premiere)

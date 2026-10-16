@@ -64,7 +64,7 @@ pub fn route(app: &mut FilmcraftApp, id: &str, params: &Value) -> Option<Result<
                 app.pick(dialog, move |app, paths| {
                     let Some(path) = paths.into_iter().next() else { return Ok(json!({"cancelled": true})) };
                     let r = export(app, &name, &path);
-                    if let Ok(_) = &r {
+                    if r.is_ok() {
                         app.ui.status = tlf!("Exported workspace “{name}”", name);
                     }
                     r

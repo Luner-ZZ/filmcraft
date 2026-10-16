@@ -241,7 +241,7 @@ pub fn import(app: &mut FilmcraftApp, path: &str) -> Result<Value, String> {
     };
     let target_name = if is_builtin(name_candidate) {
         let mut candidate = format!("{name_candidate} (Custom)");
-        let mut count = 2;
+        let mut count: usize = 2;
         while dock::find(&app.workspaces, &candidate).is_some() {
             candidate = format!("{name_candidate} (Custom {count})");
             count = count.saturating_add(1);

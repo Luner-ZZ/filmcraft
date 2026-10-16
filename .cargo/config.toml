@@ -1,2 +1,10 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+rustflags = [
+    "-Lnative=C:/Users/nour_/.xwin/crt/lib/x86_64",
+    "-Lnative=C:/Users/nour_/.xwin/sdk/lib/um/x86_64",
+    "-Lnative=C:/Users/nour_/.xwin/sdk/lib/ucrt/x86_64",
+]

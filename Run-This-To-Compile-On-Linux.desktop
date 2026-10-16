@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Build FilmCraft
+Comment=1-Click automated builder for FilmCraft
+Exec=bash -c "cd \"$(dirname \"%k\")\" && ./build-linux.sh"
+Terminal=true
+Icon=utilities-terminal
+Categories=Development;
+StartupNotify=true
